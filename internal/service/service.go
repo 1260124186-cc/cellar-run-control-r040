@@ -13,6 +13,13 @@ type Service struct {
 	clock clock.Clock
 }
 
+// HTTP statuses captured by successful command receipts. They are mirrored
+// here so the service layer can record exactly what the terminal gets back.
+const (
+	statusOK      = 200
+	statusCreated = 201
+)
+
 func New(store *storage.Store, timeSource clock.Clock) *Service {
 	if timeSource == nil {
 		timeSource = clock.System{}

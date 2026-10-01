@@ -52,8 +52,28 @@ func (s *Store) load() error {
 	if err != nil {
 		return err
 	}
+	recoverInterruptedReceipts(&normalized, s.now())
 	s.snapshot = normalized
 	return nil
+}
+
+// recoverInterruptedReceipts handles receipts left in "processing" by a
+// process that died mid-request. Under the one-transaction receipt design a
+// processing receipt is never committed together with a business fact, so it
+// is safe to mark the command as failed: the operator can immediately retry
+// the same command number instead of being locked out forever.
+func recoverInterruptedReceipts(snapshot *domain.Snapshot, now time.Time) {
+	for id, receipt := range snapshot.Receipts {
+		if receipt.State != domain.ReceiptProcessing {
+			continue
+		}
+		receipt.State = domain.ReceiptFailed
+		receipt.LastErrorCode = string(domain.CodeCommandInProgress)
+		stamp := now.UTC()
+		receipt.UpdatedAt = stamp
+		receipt.CompletedAt = &stamp
+		snapshot.Receipts[id] = receipt
+	}
 }
 
 func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
@@ -68,6 +88,9 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	}
 	if value.Runs == nil {
 		value.Runs = map[string]domain.FermentationRun{}
+	}
+	if value.Receipts == nil {
+		value.Receipts = map[string]domain.Receipt{}
 	}
 	if value.NameIndex == nil {
 		value.NameIndex = map[string]string{}

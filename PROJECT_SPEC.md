@@ -189,6 +189,17 @@ updated aggregate and its version. A failed write returns:
 Write requests may include `X-Expected-Version`. When present, the service
 rejects a stale write instead of overwriting newer state.
 
+Write requests may also carry independent command receipt headers
+(`X-Terminal-ID`, `X-Command-Number`, optional `X-Work-Order-ID`). A
+`(terminal, command number)` pair executes its business action at most once.
+Identical resends replay the first captured response (status and exact JSON
+body) with an `Idempotent-Replay: true` header; reusing the number with
+different parameters returns `409 command_reuse_conflict`. Failed validation
+creates no receipt and never locks the number. The receipt, the business
+change, and the captured response commit in a single snapshot transaction, so
+a restarted service replays committed commands and treats interrupted ones as
+retriable rather than completed.
+
 `GET /healthz` returns process health and the current snapshot revision.
 
 ## Persistence And Concurrency
@@ -196,7 +207,10 @@ rejects a stale write instead of overwriting newer state.
 The configured data directory contains `state.json`. Writes are serialized by
 an in-process mutex. The complete state is encoded, committed to durable
 storage, and then atomically renamed over the target. An update is not
-published in memory unless persistence succeeds.
+published in memory unless persistence succeeds. Command receipts live in the
+same snapshot: a receipt is only ever marked succeeded in the transaction that
+also applies its business fact and captures its response, so a crash can never
+record a success without the fact or a fact without a replayable receipt.
 
 Reads use copied values and never expose repository-owned maps or slices. The
 default address is `127.0.0.1:8088`, the request body limit is 1 MiB, and all
@@ -217,6 +231,8 @@ behavior, and exit without external services:
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check command-receipts`
+- `go run ./cmd/fermentctl check command-receipts-restart`
 
 ## Scope Limits
 

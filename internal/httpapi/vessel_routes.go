@@ -17,15 +17,20 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.CreateVessel(service.CreateVesselInput{
+		cmd, err := parseCommand(request, "vessel.create", "", body, nil)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.CreateVessel(service.CreateVesselInput{
 			Code:      body.Code,
 			CapacityL: body.CapacityL,
+			Command:   cmd,
 		})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusCreated, vessel)
+		writeCommandResult(response, result)
 	})
 
 	mux.HandleFunc("GET /v1/vessels", func(response http.ResponseWriter, _ *http.Request) {
@@ -51,13 +56,18 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.FinishCleaning(request.PathValue("id"),
-			service.FinishCleaningInput{ExpectedVersion: expected})
+		target := request.PathValue("id")
+		cmd, err := parseCommand(request, "vessel.finish_cleaning", target, struct{}{}, expected)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.FinishCleaning(target,
+			service.FinishCleaningInput{ExpectedVersion: expected, Command: cmd})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, vessel)
+		writeCommandResult(response, result)
 	})
 
 	mux.HandleFunc("POST /v1/vessels/{id}/retire", func(response http.ResponseWriter, request *http.Request) {
@@ -65,12 +75,17 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.RetireVessel(request.PathValue("id"),
-			service.VersionInput{ExpectedVersion: expected})
+		target := request.PathValue("id")
+		cmd, err := parseCommand(request, "vessel.retire", target, struct{}{}, expected)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.RetireVessel(target,
+			service.VersionInput{ExpectedVersion: expected, Command: cmd})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, vessel)
+		writeCommandResult(response, result)
 	})
 }

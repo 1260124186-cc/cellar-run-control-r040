@@ -6,13 +6,20 @@ import (
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/domain"
 )
 
-func (s *Service) CreateRun(input CreateRunInput) (domain.FermentationRun, error) {
+// runVesselPair is the response body for operations that move both a run and
+// its vessel (reserve, start, complete, abort).
+type runVesselPair struct {
+	Run    domain.FermentationRun `json:"run"`
+	Vessel domain.Vessel          `json:"vessel"`
+}
+
+func (s *Service) CreateRun(input CreateRunInput) (CommandResult, error) {
 	now := s.clock.Now()
 	code := domain.NormalizeRunCode(input.Code)
 	if code == "" {
 		generated, err := generatedRunCode()
 		if err != nil {
-			return domain.FermentationRun{}, domain.NewError(domain.CodeStorage, err.Error())
+			return CommandResult{}, domain.NewError(domain.CodeStorage, err.Error())
 		}
 		code = generated
 	}
@@ -28,157 +35,131 @@ func (s *Service) CreateRun(input CreateRunInput) (domain.FermentationRun, error
 		UpdatedAt:      now,
 	}
 	if err := run.Validate(); err != nil {
-		return domain.FermentationRun{}, err
+		return CommandResult{}, err
 	}
-	id, err := generateEntityID("run")
-	if err != nil {
-		return domain.FermentationRun{}, domain.NewError(domain.CodeStorage, err.Error())
-	}
-	run.ID = id
 
-	err = s.store.Execute(func(snapshot *domain.Snapshot) error {
+	return s.runCommand(input.Command, statusCreated, func(snapshot *domain.Snapshot) (any, error) {
 		formula, ok := snapshot.Formulas[run.FormulaID]
 		if !ok {
-			return domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
+			return nil, domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
 		}
 		if formula.State != domain.FormulaApproved {
-			return domain.NewError(domain.CodeFormulaState,
+			return nil, domain.NewError(domain.CodeFormulaState,
 				"run requires an approved formula")
 		}
 		if _, exists := snapshot.RunIndex[run.Code]; exists {
-			return domain.NewError(domain.CodeRunConflict,
+			return nil, domain.NewError(domain.CodeRunConflict,
 				"a run with the same code already exists")
 		}
+		id, err := generateEntityID("run")
+		if err != nil {
+			return nil, domain.NewError(domain.CodeStorage, err.Error())
+		}
+		run.ID = id
 		snapshot.Runs[run.ID] = run.Clone()
 		snapshot.RunIndex[run.Code] = run.ID
-		return nil
+		return run.Clone(), nil
 	})
-	if err != nil {
-		return domain.FermentationRun{}, err
-	}
-	return run.Clone(), nil
 }
 
 func (s *Service) ReserveRun(
 	id string,
 	input ReserveRunInput,
-) (domain.FermentationRun, domain.Vessel, error) {
-	var updatedRun domain.FermentationRun
-	var updatedVessel domain.Vessel
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		run, ok := snapshot.Runs[id]
 		if !ok {
-			return domain.NewError(domain.CodeRunNotFound, "run was not found")
+			return nil, domain.NewError(domain.CodeRunNotFound, "run was not found")
 		}
 		if err := s.checkExpected(run.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		vessel, ok := snapshot.Vessels[input.VesselID]
 		if !ok {
-			return domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
+			return nil, domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
 		}
 		if run.PlannedVolumeL > vessel.CapacityL {
-			return domain.FieldError(domain.CodeInvalidInput,
+			return nil, domain.FieldError(domain.CodeInvalidInput,
 				"planned_volume_liters", "exceeds vessel capacity")
 		}
 		if err := vessel.Reserve(run.ID, s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		if err := run.ReserveVessel(vessel.ID, s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		snapshot.Runs[id] = run.Clone()
 		snapshot.Vessels[vessel.ID] = vessel
-		updatedRun = run.Clone()
-		updatedVessel = vessel
-		return nil
+		return runVesselPair{Run: run.Clone(), Vessel: vessel}, nil
 	})
-	if err != nil {
-		return domain.FermentationRun{}, domain.Vessel{}, err
-	}
-	return updatedRun, updatedVessel, nil
 }
 
 func (s *Service) StartRun(
 	id string,
 	input VersionInput,
-) (domain.FermentationRun, domain.Vessel, error) {
-	var updatedRun domain.FermentationRun
-	var updatedVessel domain.Vessel
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		run, ok := snapshot.Runs[id]
 		if !ok {
-			return domain.NewError(domain.CodeRunNotFound, "run was not found")
+			return nil, domain.NewError(domain.CodeRunNotFound, "run was not found")
 		}
 		if err := s.checkExpected(run.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		if run.VesselID == nil {
-			return domain.NewError(domain.CodeRunState, "run has no vessel")
+			return nil, domain.NewError(domain.CodeRunState, "run has no vessel")
 		}
 		vessel, ok := snapshot.Vessels[*run.VesselID]
 		if !ok {
-			return domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
+			return nil, domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
 		}
 		if err := vessel.StartRun(run.ID, s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		if err := run.StartFermentation(s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		snapshot.Runs[id] = run.Clone()
 		snapshot.Vessels[vessel.ID] = vessel
-		updatedRun = run.Clone()
-		updatedVessel = vessel
-		return nil
+		return runVesselPair{Run: run.Clone(), Vessel: vessel}, nil
 	})
-	if err != nil {
-		return domain.FermentationRun{}, domain.Vessel{}, err
-	}
-	return updatedRun, updatedVessel, nil
 }
 
 func (s *Service) AbortRun(
 	id string,
 	input VersionInput,
-) (domain.FermentationRun, domain.Vessel, error) {
-	var updatedRun domain.FermentationRun
-	var updatedVessel domain.Vessel
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		run, ok := snapshot.Runs[id]
 		if !ok {
-			return domain.NewError(domain.CodeRunNotFound, "run was not found")
+			return nil, domain.NewError(domain.CodeRunNotFound, "run was not found")
 		}
 		if err := s.checkExpected(run.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		hadStarted := run.HadStarted()
 		if err := run.Abort(s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
+		var updatedVessel domain.Vessel
 		if run.VesselID != nil {
 			vessel, ok := snapshot.Vessels[*run.VesselID]
 			if !ok {
-				return domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
+				return nil, domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
 			}
 			if hadStarted {
 				if err := vessel.StartCleaning(run.ID, s.clock.Now()); err != nil {
-					return err
+					return nil, err
 				}
 			} else if err := vessel.ReleaseReservation(run.ID, s.clock.Now()); err != nil {
-				return err
+				return nil, err
 			}
 			snapshot.Vessels[vessel.ID] = vessel
 			updatedVessel = vessel
 		}
 		snapshot.Runs[id] = run.Clone()
-		updatedRun = run.Clone()
-		return nil
+		return runVesselPair{Run: run.Clone(), Vessel: updatedVessel}, nil
 	})
-	if err != nil {
-		return domain.FermentationRun{}, domain.Vessel{}, err
-	}
-	return updatedRun, updatedVessel, nil
 }
 
 func (s *Service) GetRun(id string) (domain.FermentationRun, error) {

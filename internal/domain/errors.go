@@ -23,6 +23,16 @@ const (
 	CodeObservationConflict Code = "observation_conflict"
 	CodeRevisionConflict    Code = "revision_conflict"
 	CodeStorage             Code = "storage_error"
+	// CodeCommandInProgress means the command number is held by an attempt
+	// whose result is not yet known. The client should retry the exact same
+	// request; it is never a permanent lock.
+	CodeCommandInProgress Code = "command_in_progress"
+	// CodeCommandReuseConflict means the same terminal reused a command
+	// number with a different operation, target, work order, or parameters.
+	CodeCommandReuseConflict Code = "command_reuse_conflict"
+	// CodeCommandHeaderInvalid means an idempotency header was malformed or
+	// only half of the terminal/command pair was supplied.
+	CodeCommandHeaderInvalid Code = "command_header_invalid"
 )
 
 type Error struct {

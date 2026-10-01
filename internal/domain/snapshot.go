@@ -8,6 +8,7 @@ type Snapshot struct {
 	Formulas    map[string]Formula         `json:"formulas"`
 	Vessels     map[string]Vessel          `json:"vessels"`
 	Runs        map[string]FermentationRun `json:"runs"`
+	Receipts    map[string]Receipt         `json:"receipts"`
 	NameIndex   map[string]string          `json:"formula_name_index"`
 	VesselIndex map[string]string          `json:"vessel_code_index"`
 	RunIndex    map[string]string          `json:"run_code_index"`
@@ -19,6 +20,7 @@ func EmptySnapshot() Snapshot {
 		Formulas:    map[string]Formula{},
 		Vessels:     map[string]Vessel{},
 		Runs:        map[string]FermentationRun{},
+		Receipts:    map[string]Receipt{},
 		NameIndex:   map[string]string{},
 		VesselIndex: map[string]string{},
 		RunIndex:    map[string]string{},
@@ -43,6 +45,9 @@ func (s Snapshot) Clone() Snapshot {
 	for key, value := range s.Runs {
 		cloned.Runs[key] = value.Clone()
 	}
+	for key, value := range s.Receipts {
+		cloned.Receipts[key] = cloneReceipt(value)
+	}
 	for key, value := range s.NameIndex {
 		cloned.NameIndex[key] = value
 	}
@@ -64,4 +69,16 @@ func withActiveRun(v Vessel, runID *string) Vessel {
 	copied := *runID
 	value.ActiveRunID = &copied
 	return value
+}
+
+func cloneReceipt(value Receipt) Receipt {
+	cloned := value
+	if value.ResponseBody != nil {
+		cloned.ResponseBody = append([]byte(nil), value.ResponseBody...)
+	}
+	if value.CompletedAt != nil {
+		stamp := *value.CompletedAt
+		cloned.CompletedAt = &stamp
+	}
+	return cloned
 }

@@ -18,6 +18,14 @@ type client struct {
 type response struct {
 	status int
 	body   []byte
+	replay bool
+}
+
+// command carries the idempotency headers for one instruction.
+type command struct {
+	terminalID string
+	number     string
+	workOrder  string
 }
 
 func newClient(baseURL string) *client {
@@ -34,6 +42,16 @@ func (c *client) call(
 	path string,
 	payload any,
 	expectedVersion *int64,
+) (response, error) {
+	return c.callWithCommand(method, path, payload, expectedVersion, nil)
+}
+
+func (c *client) callWithCommand(
+	method string,
+	path string,
+	payload any,
+	expectedVersion *int64,
+	cmd *command,
 ) (response, error) {
 	var body io.Reader
 	if payload != nil {
@@ -53,6 +71,13 @@ func (c *client) call(
 	if expectedVersion != nil {
 		request.Header.Set("X-Expected-Version", fmt.Sprintf("%d", *expectedVersion))
 	}
+	if cmd != nil {
+		request.Header.Set("X-Terminal-ID", cmd.terminalID)
+		request.Header.Set("X-Command-Number", cmd.number)
+		if cmd.workOrder != "" {
+			request.Header.Set("X-Work-Order-ID", cmd.workOrder)
+		}
+	}
 	raw, err := c.http.Do(request)
 	if err != nil {
 		return response{}, fmt.Errorf("perform request: %w", err)
@@ -62,7 +87,11 @@ func (c *client) call(
 	if err != nil {
 		return response{}, fmt.Errorf("read response: %w", err)
 	}
-	return response{status: raw.StatusCode, body: content}, nil
+	return response{
+		status: raw.StatusCode,
+		body:   content,
+		replay: raw.Header.Get("Idempotent-Replay") == "true",
+	}, nil
 }
 
 func (r response) decode(target any) error {

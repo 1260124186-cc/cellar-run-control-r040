@@ -7,7 +7,7 @@ import (
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/domain"
 )
 
-func (s *Service) CreateFormula(input CreateFormulaInput) (domain.Formula, error) {
+func (s *Service) CreateFormula(input CreateFormulaInput) (CommandResult, error) {
 	now := s.clock.Now()
 	formula := domain.Formula{
 		Name:                  input.Name,
@@ -25,108 +25,90 @@ func (s *Service) CreateFormula(input CreateFormulaInput) (domain.Formula, error
 	}
 	formula.Normalize()
 	if err := formula.Validate(); err != nil {
-		return domain.Formula{}, err
+		return CommandResult{}, err
 	}
-	id, err := generateEntityID("formula")
-	if err != nil {
-		return domain.Formula{}, domain.NewError(domain.CodeStorage, err.Error())
-	}
-	formula.ID = id
 	nameKey := domain.NameKey(formula.Name)
 
-	err = s.store.Execute(func(snapshot *domain.Snapshot) error {
+	return s.runCommand(input.Command, statusCreated, func(snapshot *domain.Snapshot) (any, error) {
+		id, err := generateEntityID("formula")
+		if err != nil {
+			return nil, domain.NewError(domain.CodeStorage, err.Error())
+		}
+		formula.ID = id
 		if _, exists := snapshot.NameIndex[nameKey]; exists {
-			return domain.NewError(domain.CodeFormulaNameConflict,
+			return nil, domain.NewError(domain.CodeFormulaNameConflict,
 				"a formula with the same normalized name already exists")
 		}
 		snapshot.Formulas[formula.ID] = formula
 		snapshot.NameIndex[nameKey] = formula.ID
-		return nil
+		created := formula.Clone()
+		if created.Steps == nil {
+			created.Steps = []domain.FormulaStep{}
+		}
+		return created, nil
 	})
-	if err != nil {
-		return domain.Formula{}, err
-	}
-	return formula.Clone(), nil
 }
 
 func (s *Service) SetFormulaSteps(
 	id string,
 	input SetFormulaStepsInput,
-) (domain.Formula, error) {
-	var updated domain.Formula
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		formula, ok := snapshot.Formulas[id]
 		if !ok {
-			return domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
+			return nil, domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
 		}
 		if err := s.checkExpected(formula.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		if err := formula.SetSteps(input.Steps); err != nil {
-			return err
+			return nil, err
 		}
 		formula.UpdatedAt = s.clock.Now()
 		snapshot.Formulas[id] = formula
-		updated = formula.Clone()
-		return nil
+		return formula.Clone(), nil
 	})
-	if err != nil {
-		return domain.Formula{}, err
-	}
-	return updated, nil
 }
 
-func (s *Service) ApproveFormula(id string, input VersionInput) (domain.Formula, error) {
-	var updated domain.Formula
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+func (s *Service) ApproveFormula(id string, input VersionInput) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		formula, ok := snapshot.Formulas[id]
 		if !ok {
-			return domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
+			return nil, domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
 		}
 		if err := s.checkExpected(formula.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		if err := formula.Approve(s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		snapshot.Formulas[id] = formula
-		updated = formula.Clone()
-		return nil
+		return formula.Clone(), nil
 	})
-	if err != nil {
-		return domain.Formula{}, err
-	}
-	return updated, nil
 }
 
-func (s *Service) RetireFormula(id string, input VersionInput) (domain.Formula, error) {
-	var updated domain.Formula
-	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+func (s *Service) RetireFormula(id string, input VersionInput) (CommandResult, error) {
+	return s.runCommand(input.Command, statusOK, func(snapshot *domain.Snapshot) (any, error) {
 		formula, ok := snapshot.Formulas[id]
 		if !ok {
-			return domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
+			return nil, domain.NewError(domain.CodeFormulaNotFound, "formula was not found")
 		}
 		if err := s.checkExpected(formula.Version, input.ExpectedVersion); err != nil {
-			return err
+			return nil, err
 		}
 		for _, run := range snapshot.Runs {
 			if run.FormulaID == id && run.State != domain.RunCompleted &&
 				run.State != domain.RunAborted {
-				return domain.NewError(domain.CodeFormulaInUse,
+				return nil, domain.NewError(domain.CodeFormulaInUse,
 					"formula is attached to a run that is still open")
 			}
 		}
 		if err := formula.Retire(s.clock.Now()); err != nil {
-			return err
+			return nil, err
 		}
 		snapshot.Formulas[id] = formula
-		updated = formula.Clone()
-		return nil
+		return formula.Clone(), nil
 	})
-	if err != nil {
-		return domain.Formula{}, err
-	}
-	return updated, nil
 }
 
 func (s *Service) GetFormula(id string) (domain.Formula, error) {

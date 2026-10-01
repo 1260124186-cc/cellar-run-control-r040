@@ -107,6 +107,46 @@ shape:
 }
 ```
 
+## Command Receipts (idempotent writes)
+
+Workshop terminals on weak wireless links can time out after the server has
+already applied a command. Operators resend, and without protection the
+service would create a second formula or run, or advance a run twice. Every
+write route therefore accepts an optional independent command receipt:
+
+- `X-Terminal-ID`: stable identifier of the issuing terminal.
+- `X-Command-Number`: a number the terminal generates per physical command
+  and reuses unchanged on every resend of that command.
+- `X-Work-Order-ID` (optional): the cellar work order the command belongs to.
+
+The terminal and command number must always be sent together; sending just
+one is rejected with `command_header_invalid`. Requests without either header
+run exactly as before, so existing clients keep working.
+
+Semantics:
+
+- The first successful request for a `(terminal, command number)` pair
+  performs the business action exactly once and records the complete response
+  (status code and exact JSON body) in the same atomic snapshot transaction.
+- An identical resend (same operation, target aggregate, work order, and
+  request parameters) never applies the action again. The server returns the
+  stored first response byte-for-byte with the added header
+  `Idempotent-Replay: true` and the original status code (for example `201`).
+- Reusing the same command number with a different operation, target, work
+  order, or parameter set fails with `409 command_reuse_conflict` and creates
+  no business fact. The detail says which part was reused.
+- A request that fails validation or a domain rule stores no receipt, so the
+  same command number can be retried immediately with corrected parameters.
+  Failures never lock a command number.
+- Two terminals sending the same `(terminal, command number)` concurrently
+  are serialized by the snapshot lock: exactly one request executes and the
+  others receive the replay. Different terminals have independent number
+  spaces.
+- If the process dies while handling a command, the restarted service treats
+  the interrupted receipt as failed rather than completed; resending the same
+  command number either applies it once or replays the committed result,
+  deterministically.
+
 ## Workflow Checks
 
 Run each production workflow check separately:
@@ -115,6 +155,8 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check command-receipts
+go run ./cmd/fermentctl check command-receipts-restart
 ```
 
 Each check creates a temporary snapshot directory, starts the real HTTP
