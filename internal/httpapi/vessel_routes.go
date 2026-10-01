@@ -17,15 +17,20 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.CreateVessel(service.CreateVesselInput{
-			Code:      body.Code,
-			CapacityL: body.CapacityL,
+		instruction, err := buildInstruction(request, "POST /v1/vessels", body)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.CreateVessel(service.CreateVesselInput{
+			Code:        body.Code,
+			CapacityL:   body.CapacityL,
+			Instruction: instruction,
 		})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusCreated, vessel)
+		writeInstructionResult(response, result)
 	})
 
 	mux.HandleFunc("GET /v1/vessels", func(response http.ResponseWriter, _ *http.Request) {
@@ -51,13 +56,21 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.FinishCleaning(request.PathValue("id"),
-			service.FinishCleaningInput{ExpectedVersion: expected})
+		route := "POST /v1/vessels/{id}/finish-cleaning"
+		instruction, err := buildInstruction(request, route, nil)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.FinishCleaning(request.PathValue("id"),
+			service.FinishCleaningInput{
+				ExpectedVersion: expected,
+				Instruction:     instruction,
+			})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, vessel)
+		writeInstructionResult(response, result)
 	})
 
 	mux.HandleFunc("POST /v1/vessels/{id}/retire", func(response http.ResponseWriter, request *http.Request) {
@@ -65,12 +78,17 @@ func registerVesselRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		vessel, err := app.RetireVessel(request.PathValue("id"),
-			service.VersionInput{ExpectedVersion: expected})
+		route := "POST /v1/vessels/{id}/retire"
+		instruction, err := buildInstruction(request, route, nil)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.RetireVessel(request.PathValue("id"),
+			service.VersionInput{ExpectedVersion: expected, Instruction: instruction})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, vessel)
+		writeInstructionResult(response, result)
 	})
 }

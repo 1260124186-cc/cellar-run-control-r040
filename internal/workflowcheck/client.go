@@ -15,9 +15,16 @@ type client struct {
 	http    *http.Client
 }
 
+type requestOptions struct {
+	expectedVersion *int64
+	instructionKey  string
+	terminalID      string
+}
+
 type response struct {
 	status int
 	body   []byte
+	replay bool
 }
 
 func newClient(baseURL string) *client {
@@ -35,6 +42,17 @@ func (c *client) call(
 	payload any,
 	expectedVersion *int64,
 ) (response, error) {
+	return c.callWith(method, path, payload, requestOptions{
+		expectedVersion: expectedVersion,
+	})
+}
+
+func (c *client) callWith(
+	method string,
+	path string,
+	payload any,
+	options requestOptions,
+) (response, error) {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -50,8 +68,14 @@ func (c *client) call(
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if expectedVersion != nil {
-		request.Header.Set("X-Expected-Version", fmt.Sprintf("%d", *expectedVersion))
+	if options.expectedVersion != nil {
+		request.Header.Set("X-Expected-Version", fmt.Sprintf("%d", *options.expectedVersion))
+	}
+	if options.instructionKey != "" {
+		request.Header.Set("X-Instruction-Key", options.instructionKey)
+	}
+	if options.terminalID != "" {
+		request.Header.Set("X-Terminal-ID", options.terminalID)
 	}
 	raw, err := c.http.Do(request)
 	if err != nil {
@@ -62,7 +86,11 @@ func (c *client) call(
 	if err != nil {
 		return response{}, fmt.Errorf("read response: %w", err)
 	}
-	return response{status: raw.StatusCode, body: content}, nil
+	return response{
+		status: raw.StatusCode,
+		body:   content,
+		replay: raw.Header.Get("X-Instruction-Replay") == "true",
+	}, nil
 }
 
 func (r response) decode(target any) error {

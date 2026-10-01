@@ -27,7 +27,11 @@ func registerFormulaRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		formula, err := app.CreateFormula(service.CreateFormulaInput{
+		instruction, err := buildInstruction(request, "POST /v1/formulas", body)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.CreateFormula(service.CreateFormulaInput{
 			Name:                  body.Name,
 			Style:                 body.Style,
 			TargetOriginalGravity: body.TargetOriginalGravity,
@@ -35,12 +39,13 @@ func registerFormulaRoutes(mux *http.ServeMux, app *service.Service) {
 			MaxFermentationTempC:  body.MaxFermentationTempC,
 			MinimumDays:           body.MinimumDays,
 			MaximumDays:           body.MaximumDays,
+			Instruction:           instruction,
 		})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusCreated, formula)
+		writeInstructionResult(response, result)
 	})
 
 	mux.HandleFunc("GET /v1/formulas", func(response http.ResponseWriter, _ *http.Request) {
@@ -70,13 +75,22 @@ func registerFormulaRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		formula, err := app.SetFormulaSteps(request.PathValue("id"),
-			service.SetFormulaStepsInput{ExpectedVersion: expected, Steps: body.Steps})
+		route := "PUT /v1/formulas/{id}/steps"
+		instruction, err := buildInstruction(request, route, body)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.SetFormulaSteps(request.PathValue("id"),
+			service.SetFormulaStepsInput{
+				ExpectedVersion: expected,
+				Steps:           body.Steps,
+				Instruction:     instruction,
+			})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, formula)
+		writeInstructionResult(response, result)
 	})
 
 	mux.HandleFunc("POST /v1/formulas/{id}/approve", func(response http.ResponseWriter, request *http.Request) {
@@ -84,13 +98,18 @@ func registerFormulaRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		formula, err := app.ApproveFormula(request.PathValue("id"),
-			service.VersionInput{ExpectedVersion: expected})
+		route := "POST /v1/formulas/{id}/approve"
+		instruction, err := buildInstruction(request, route, nil)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.ApproveFormula(request.PathValue("id"),
+			service.VersionInput{ExpectedVersion: expected, Instruction: instruction})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, formula)
+		writeInstructionResult(response, result)
 	})
 
 	mux.HandleFunc("POST /v1/formulas/{id}/retire", func(response http.ResponseWriter, request *http.Request) {
@@ -98,12 +117,17 @@ func registerFormulaRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		formula, err := app.RetireFormula(request.PathValue("id"),
-			service.VersionInput{ExpectedVersion: expected})
+		route := "POST /v1/formulas/{id}/retire"
+		instruction, err := buildInstruction(request, route, nil)
+		if !handleDecode(response, err) {
+			return
+		}
+		result, err := app.RetireFormula(request.PathValue("id"),
+			service.VersionInput{ExpectedVersion: expected, Instruction: instruction})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, formula)
+		writeInstructionResult(response, result)
 	})
 }

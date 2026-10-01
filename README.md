@@ -107,6 +107,33 @@ shape:
 }
 ```
 
+## Instruction Receipts
+
+Writes also accept an optional `X-Instruction-Key` header (8 to 128
+characters, typically a UUID generated on the terminal), plus an optional
+`X-Terminal-ID` for diagnostics. A key makes a write instruction idempotent:
+
+- The first successful request applies the business change once and its full
+  response is stored as a receipt.
+- Repeating the same key with the same request parameters (the same HTTP
+  method, resource path, and JSON body) returns the first status code and
+  response body byte for byte, with the `X-Instruction-Replay: true` response
+  header, and performs no additional state change.
+- Reusing a key with different parameters returns
+  `409 instruction_key_occupied`. The optimistic-lock header
+  `X-Expected-Version` is not part of the request fingerprint, so a terminal
+  that learned the newer version still replays the original response.
+- A request that fails validation or a state precondition records nothing;
+  the same key can be retried and later succeed. Failed attempts never lock
+  the key.
+- Duplicate checks, receipt storage, and the business mutation commit in one
+  atomic snapshot revision, so two terminals racing for one key, a wireless
+  timeout followed by a reconnect, and a restart after an interrupted write
+  all resolve to one business fact.
+- Receipts are kept in `state.json` for 30 days and are pruned opportunistically.
+
+Requests without `X-Instruction-Key` keep the legacy non-idempotent behavior.
+
 ## Workflow Checks
 
 Run each production workflow check separately:
@@ -115,6 +142,7 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check instruction-receipts
 ```
 
 Each check creates a temporary snapshot directory, starts the real HTTP

@@ -189,6 +189,26 @@ updated aggregate and its version. A failed write returns:
 Write requests may include `X-Expected-Version`. When present, the service
 rejects a stale write instead of overwriting newer state.
 
+Write requests may also include `X-Instruction-Key` (with optional
+`X-Terminal-ID`) for an independent instruction receipt. The receipt
+deduplicates repeated submissions of the same instruction from flaky cellar
+terminals:
+
+- The key, request method, resource path, and canonical JSON body identify
+  the instruction. `X-Expected-Version` is an optimistic-lock precondition
+  and is not part of that fingerprint.
+- The first successful request stores the complete response as a receipt in
+  the same atomic revision as the business mutation. Replays return the
+  stored status code and exact response bytes (with
+  `X-Instruction-Replay: true`) and never apply a second business fact.
+- Reusing a key with different parameters fails with
+  `409 instruction_key_occupied`.
+- Only successful requests record receipts. Validation, state, and storage
+  failures leave the key free so a corrected retry can succeed.
+- Receipts persist across restarts and are retained for 30 days; pruning
+  happens inside regular write transactions.
+- Requests without the header retain the legacy non-idempotent behavior.
+
 `GET /healthz` returns process health and the current snapshot revision.
 
 ## Persistence And Concurrency
@@ -196,7 +216,9 @@ rejects a stale write instead of overwriting newer state.
 The configured data directory contains `state.json`. Writes are serialized by
 an in-process mutex. The complete state is encoded, committed to durable
 storage, and then atomically renamed over the target. An update is not
-published in memory unless persistence succeeds.
+published in memory unless persistence succeeds. Instruction receipts commit
+in the same transaction as their business fact, so a crash never separates a
+receipt from the fact it records.
 
 Reads use copied values and never expose repository-owned maps or slices. The
 default address is `127.0.0.1:8088`, the request body limit is 1 MiB, and all
@@ -217,6 +239,7 @@ behavior, and exit without external services:
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check instruction-receipts`
 
 ## Scope Limits
 

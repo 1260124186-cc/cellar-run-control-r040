@@ -69,6 +69,9 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	if value.Runs == nil {
 		value.Runs = map[string]domain.FermentationRun{}
 	}
+	if value.Receipts == nil {
+		value.Receipts = map[string]domain.InstructionReceipt{}
+	}
 	if value.NameIndex == nil {
 		value.NameIndex = map[string]string{}
 	}
@@ -118,7 +121,20 @@ func validateIndexes(value domain.Snapshot) error {
 		}
 		expectedRuns[run.Code] = id
 	}
-	return compareIndexes("run code", value.RunIndex, expectedRuns)
+	if err := compareIndexes("run code", value.RunIndex, expectedRuns); err != nil {
+		return err
+	}
+
+	for key, receipt := range value.Receipts {
+		if receipt.Key == "" || receipt.Key != key {
+			return fmt.Errorf("instruction receipt index does not match its receipts")
+		}
+		if receipt.Fingerprint == "" || receipt.Status < 200 ||
+			receipt.Status >= 300 || len(receipt.ResponseJSON) == 0 {
+			return fmt.Errorf("instruction receipt %s is incomplete", key)
+		}
+	}
+	return nil
 }
 
 func compareIndexes(label string, actual, expected map[string]string) error {

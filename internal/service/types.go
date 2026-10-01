@@ -14,20 +14,24 @@ type CreateFormulaInput struct {
 	MaxFermentationTempC  float64
 	MinimumDays           int
 	MaximumDays           int
+	Instruction           Instruction
 }
 
 type SetFormulaStepsInput struct {
 	ExpectedVersion *int64
 	Steps           []domain.FormulaStep
+	Instruction     Instruction
 }
 
 type VersionInput struct {
 	ExpectedVersion *int64
+	Instruction     Instruction
 }
 
 type CreateVesselInput struct {
-	Code      string
-	CapacityL float64
+	Code        string
+	CapacityL   float64
+	Instruction Instruction
 }
 
 type CreateRunInput struct {
@@ -35,11 +39,13 @@ type CreateRunInput struct {
 	FormulaID      string
 	PlannedVolumeL float64
 	Notes          string
+	Instruction    Instruction
 }
 
 type ReserveRunInput struct {
 	ExpectedVersion *int64
 	VesselID        string
+	Instruction     Instruction
 }
 
 type ObservationInput struct {
@@ -48,8 +54,10 @@ type ObservationInput struct {
 	TemperatureC float64
 	ObservedAt   time.Time
 	Note         string
+	Instruction  Instruction
 }
 
 type FinishCleaningInput struct {
 	ExpectedVersion *int64
+	Instruction     Instruction
 }

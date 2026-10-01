@@ -12,6 +12,22 @@ import (
 )
 
 func Run(name string) error {
+	switch name {
+	case "instruction-receipts":
+		// This check owns a restart cycle, so it manages its own fixtures.
+		if err := instructionReceipts(); err != nil {
+			return err
+		}
+	default:
+		if err := runWithServer(name); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("workflow check passed: %s\n", name)
+	return nil
+}
+
+func runWithServer(name string) error {
 	dataDir, err := os.MkdirTemp("", "cellar-run-check-*")
 	if err != nil {
 		return fmt.Errorf("create check directory: %w", err)
@@ -29,20 +45,12 @@ func Run(name string) error {
 
 	switch name {
 	case "formula-approval":
-		if err := formulaApproval(api); err != nil {
-			return err
-		}
+		return formulaApproval(api)
 	case "vessel-run-lifecycle":
-		if err := vesselRunLifecycle(api); err != nil {
-			return err
-		}
+		return vesselRunLifecycle(api)
 	case "observations-completion":
-		if err := observationsCompletion(api); err != nil {
-			return err
-		}
+		return observationsCompletion(api)
 	default:
 		return fmt.Errorf("unknown workflow check %q", name)
 	}
-	fmt.Printf("workflow check passed: %s\n", name)
-	return nil
 }
